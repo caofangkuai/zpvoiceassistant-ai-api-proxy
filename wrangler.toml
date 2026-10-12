@@ -1,0 +1,20 @@
+name = "iot-ai-proxy"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+[vars]
+# Public proxy: no device params here. Every caller supplies their own
+# base64-encoded credential as the API key (Bearer token). See src/credential.js.
+#
+# Upstream IoT study assistant endpoint.
+UPSTREAM_BASE = "https://iot-admin.zuoyebang.com/iot-study/assistant"
+
+# Default model when the request omits one.
+DEFAULT_MODEL = "deepseek-v3"
+
+# KV namespace used to remember how much conversation history has been replayed
+# into an upstream thread (backfill). Optional: without it, backfill is skipped.
+# Create with: wrangler kv namespace create HISTORY
+[[kv_namespaces]]
+binding = "HISTORY"
+id = "00000000000000000000000000000000"
