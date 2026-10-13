@@ -54,12 +54,32 @@ function secretKey(secret) {
 const USAGE_PREFIX = "usage:";
 const USAGE_TTL = 60 * 60 * 24 * 30; // 30 days
 
-// Rough token estimate. The upstream never reports usage, so we approximate with
-// a chars/4 heuristic (common for mixed CJK/Latin). Good enough for accounting.
+// Rough token estimate. The upstream never reports usage, so we approximate.
+// Heuristic (industry-standard rules of thumb):
+//   - CJK / full-width characters: ~1.5 tokens per char
+//   - other (Latin/digits/space/punct): ~1 token per 4 chars
+// Good enough for accounting; not exact.
 export function estimateTokens(text) {
   if (!text) return 0;
   const s = typeof text === "string" ? text : String(text);
-  return Math.max(1, Math.ceil(s.length / 4));
+  let cjk = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    // CJK Unified Ideographs, Extension A, Hiragana/Katakana, Hangul,
+    // CJK symbols/punctuation, full-width forms.
+    if (
+      (c >= 0x4e00 && c <= 0x9fff) ||
+      (c >= 0x3400 && c <= 0x4dbf) ||
+      (c >= 0x3040 && c <= 0x30ff) ||
+      (c >= 0xac00 && c <= 0xd7af) ||
+      (c >= 0x3000 && c <= 0x303f) ||
+      (c >= 0xff00 && c <= 0xffef)
+    ) {
+      cjk++;
+    }
+  }
+  const other = s.length - cjk;
+  return Math.max(1, Math.ceil(cjk * 1.5 + other / 4));
 }
 
 // Per-sn cumulative usage record stored in KV. Returns the record (or a zeroed
