@@ -33,7 +33,7 @@ export default {
 
     // Home page: build an API key and chat for debugging.
     if ((pathname === "/" || pathname === "/ui") && (request.method === "GET" || request.method === "HEAD")) {
-      return renderHome();
+      return renderHome(request.headers.get("x-mount-base") || "");
     }
 
     // Public model list for OpenAI-compatible clients.

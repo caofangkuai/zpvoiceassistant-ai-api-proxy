@@ -1,7 +1,8 @@
 // Home page UI, adapted from turingevo/tiny-webui (MIT), localized to Chinese.
 // Adds a secret/sn -> API key generator on top of the streaming chat client.
 
-export function renderHome() {
+export function renderHome(basePath = "") {
+  const base = basePath.replace(/\/$/, ""); // e.g. "" or "/zpvoiceassistant-ai-api-proxy"
   const html = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -497,6 +498,10 @@ let renderTimer = null;
 let newChat = false;
 let sessionTokens = 0;
 
+// API base path (empty at site root, or "/zpvoiceassistant-ai-api-proxy" when
+// mounted under a sub-path). Injected by the server.
+var API_BASE = ${JSON.stringify(base)};
+
 // ---- Theme ----
 (function initTheme() {
   var saved = localStorage.getItem('iot-theme') || 'dark';
@@ -518,7 +523,7 @@ function updateThemeButton() {
 
 // ---- Endpoint (full URL) ----
 function defaultEndpoint() {
-  return location.origin + '/v1/chat/completions';
+  return location.origin + API_BASE + '/v1/chat/completions';
 }
 function updateEndpointFull() {
   var v = document.getElementById('endpoint').value.trim() || defaultEndpoint();
@@ -534,7 +539,7 @@ updateThemeButton();
 async function fetchModels() {
   var sel = document.getElementById('model-select');
   try {
-    var res = await fetch('/v1/models');
+    var res = await fetch(API_BASE + '/v1/models');
     var data = await res.json();
     var models = (data.data || []).map(function(m) { return m.id; });
     if (!models.length) throw new Error('模型列表为空');
@@ -561,7 +566,7 @@ async function refreshUsage() {
   if (!key) { info.textContent = '请先填写 API Key'; return; }
   info.textContent = '查询中……';
   try {
-    var res = await fetch('/v1/usage', { headers: { 'Authorization': 'Bearer ' + key } });
+    var res = await fetch(API_BASE + '/v1/usage', { headers: { 'Authorization': 'Bearer ' + key } });
     var data = await res.json();
     if (!res.ok) throw new Error(data.error?.message || ('HTTP ' + res.status));
     info.textContent = '请求 ' + data.requests + ' 次 · 输入 ' + data.prompt_tokens +
