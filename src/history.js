@@ -51,6 +51,49 @@ function secretKey(secret) {
   return h.toString(16);
 }
 
+const USAGE_PREFIX = "usage:";
+const USAGE_TTL = 60 * 60 * 24 * 30; // 30 days
+
+// Rough token estimate. The upstream never reports usage, so we approximate with
+// a chars/4 heuristic (common for mixed CJK/Latin). Good enough for accounting.
+export function estimateTokens(text) {
+  if (!text) return 0;
+  const s = typeof text === "string" ? text : String(text);
+  return Math.max(1, Math.ceil(s.length / 4));
+}
+
+// Per-sn cumulative usage record stored in KV. Returns the record (or a zeroed
+// one). KV is eventually consistent, so counts are best-effort.
+export async function getUsage(env, sn) {
+  const empty = { requests: 0, prompt_tokens: 0, completion_tokens: 0, updated: 0 };
+  if (!env.HISTORY || !sn) return empty;
+  try {
+    const v = await env.HISTORY.get(`${USAGE_PREFIX}${sn}`, "json");
+    return v && typeof v === "object" ? { ...empty, ...v } : empty;
+  } catch {
+    return empty;
+  }
+}
+
+// Accumulate a usage delta onto the per-sn record.
+export async function addUsage(env, sn, delta) {
+  if (!env.HISTORY || !sn || !delta) return;
+  try {
+    const cur = await getUsage(env, sn);
+    const next = {
+      requests: (cur.requests || 0) + 1,
+      prompt_tokens: (cur.prompt_tokens || 0) + (delta.prompt_tokens || 0),
+      completion_tokens: (cur.completion_tokens || 0) + (delta.completion_tokens || 0),
+      updated: Date.now(),
+    };
+    await env.HISTORY.put(`${USAGE_PREFIX}${sn}`, JSON.stringify(next), {
+      expirationTtl: USAGE_TTL,
+    });
+  } catch {
+    // best-effort
+  }
+}
+
 // Read the number of already-replayed non-system messages for this conversation.
 export async function getReplayedCount(env, sn, chatId) {
   if (!env.HISTORY) return 0;

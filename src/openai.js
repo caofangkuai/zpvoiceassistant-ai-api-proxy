@@ -8,7 +8,13 @@ import {
   resolveUpstreamModel,
   sendChatTurn,
 } from "./upstream.js";
-import { backfillHistory, getCachedToken, setCachedToken } from "./history.js";
+import {
+  backfillHistory,
+  estimateTokens,
+  addUsage,
+  getCachedToken,
+  setCachedToken,
+} from "./history.js";
 import { CORS_HEADERS, corsFor } from "./cors.js";
 
 // Injected as a prefix on the first turn of a brand-new conversation. Sets a
@@ -200,11 +206,17 @@ export async function handleChatCompletions(request, env, cred) {
 
   const created = Math.floor(Date.now() / 1000);
   const id = `chatcmpl-${crypto.randomUUID().replace(/-/g, "")}`;
+  const promptTokens = estimateTokens(
+    messages.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))).join("\n")
+  );
   const meta = {
     id,
     created,
     model: requestedModel,
     reasoning,
+    promptTokens,
+    sn: commonParams.sn,
+    env,
     // If the client didn't pin a chatId, echo the upstream chatId back via a
     // response header once we learn it (from the "done" event) so callers can
     // persist the thread. `sessionHolder` is filled by the parsers below.
@@ -243,6 +255,12 @@ async function aggregate(upstream, meta, cors) {
   }
   const message = { role: "assistant", content: text };
   if (reason) message.reasoning_content = reason;
+  const completionTokens = estimateTokens(text + reason);
+  const promptTokens = meta.promptTokens || 0;
+  await addUsage(meta.env, meta.sn, {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+  });
   const payload = {
     id: meta.id,
     object: "chat.completion",
@@ -255,7 +273,11 @@ async function aggregate(upstream, meta, cors) {
         finish_reason: "stop",
       },
     ],
-    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    usage: {
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: promptTokens + completionTokens,
+    },
   };
   const headers = { "Content-Type": "application/json; charset=utf-8", ...cors };
   if (upstreamChatId) headers["x-iot-chat-id"] = upstreamChatId;
@@ -290,6 +312,7 @@ function streamResponse(upstream, meta, cors) {
   (async () => {
     let sawError = null;
     let sawText = false;
+    let completionText = "";
     try {
       // Initial role frame.
       await send(frame({ role: "assistant", content: "" }));
@@ -298,11 +321,13 @@ function streamResponse(upstream, meta, cors) {
         if (evt.event === "message" && evt.data) {
           const reason = evt.data.reasonContent;
           if (typeof reason === "string" && reason.length > 0) {
+            completionText += reason;
             await send(frame({ reasoning_content: reason }));
           }
           const piece = evt.data.content;
           if (typeof piece === "string" && piece.length > 0) {
             sawText = true;
+            completionText += piece;
             await send(frame({ content: piece }));
           }
         } else if (evt.event === "done") {
@@ -321,6 +346,25 @@ function streamResponse(upstream, meta, cors) {
       } else {
         await send(frame({}, "stop"));
       }
+      // Final usage frame (OpenAI sends usage on the last chunk when enabled).
+      const promptTokens = meta.promptTokens || 0;
+      const completionTokens = estimateTokens(completionText);
+      await send({
+        id: meta.id,
+        object: "chat.completion.chunk",
+        created: meta.created,
+        model: meta.model,
+        choices: [],
+        usage: {
+          prompt_tokens: promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens: promptTokens + completionTokens,
+        },
+      });
+      await addUsage(meta.env, meta.sn, {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+      });
       await writer.write(encoder.encode("data: [DONE]\n\n"));
     } catch (e) {
       await send(frame({ content: `\n[proxy error: ${e.message}]` }, "stop"));

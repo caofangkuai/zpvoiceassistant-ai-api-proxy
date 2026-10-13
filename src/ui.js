@@ -29,6 +29,27 @@ export function renderHome() {
     --text-dim: #888;
     --border: rgba(255, 176, 0, 0.2);
     --code-bg: #0d1117;
+    --scan-opacity: 0.03;
+    --vignette: rgba(0,0,0,0.4);
+  }
+  html[data-theme="light"] {
+    --bg-deep: #f2f3f5;
+    --bg-panel: rgba(255, 255, 255, 0.9);
+    --bg-input: #ffffff;
+    --amber: #b87400;
+    --amber-dim: #9a6100;
+    --amber-glow: rgba(184, 116, 0, 0.12);
+    --green: #0a8f4d;
+    --green-dim: #0a7a42;
+    --green-glow: rgba(10, 143, 77, 0.1);
+    --cyan: #0077b6;
+    --cyan-glow: rgba(0, 119, 182, 0.1);
+    --text: #1a1a1a;
+    --text-dim: #666;
+    --border: rgba(0, 0, 0, 0.14);
+    --code-bg: #f6f8fa;
+    --scan-opacity: 0;
+    --vignette: rgba(0,0,0,0.05);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; overflow: hidden; background: var(--bg-deep); }
@@ -45,7 +66,7 @@ export function renderHome() {
     content: '';
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
-    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,var(--scan-opacity)) 2px, rgba(0,0,0,var(--scan-opacity)) 4px);
     pointer-events: none;
     z-index: 9999;
   }
@@ -53,7 +74,7 @@ export function renderHome() {
     content: '';
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
-    background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.4) 100%);
+    background: radial-gradient(ellipse at center, transparent 50%, var(--vignette) 100%);
     pointer-events: none;
     z-index: 9998;
   }
@@ -315,8 +336,9 @@ export function renderHome() {
     <div class="logo-icon">⬡</div>
     iot-study AI 代理
   </div>
-  <div class="web" style="font-size:11px;color:var(--text-dim);">
-    兼容 OpenAI 格式 · SSE 流式
+  <div class="web" style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:12px;">
+    <span>兼容 OpenAI 格式 · SSE 流式</span>
+    <button id="theme-toggle" class="mini-btn" style="width:auto;margin:0;padding:6px 12px;">☀ 白天</button>
   </div>
   <div class="header-stats">
     <div class="stat-item">
@@ -361,8 +383,9 @@ export function renderHome() {
       <div class="settings-title">配置</div>
 
       <div class="setting-item">
-        <label class="setting-label">接口地址</label>
-        <input type="text" class="setting-input" id="endpoint" value="/v1/chat/completions" />
+        <label class="setting-label">接口地址（完整 URL）</label>
+        <input type="text" class="setting-input" id="endpoint" value="" />
+        <div class="hint" id="endpoint-full"></div>
       </div>
 
       <div class="setting-item">
@@ -372,7 +395,13 @@ export function renderHome() {
 
       <div class="setting-item">
         <label class="setting-label">模型</label>
-        <input type="text" class="setting-input" id="model" value="deepseek-v3" />
+        <div style="display:flex;gap:6px;">
+          <input type="text" class="setting-input" id="model" value="deepseek-v3" />
+          <button class="mini-btn" style="width:auto;margin:0;padding:0 10px;flex-shrink:0;" onclick="fetchModels()" title="从 /v1/models 拉取模型列表">拉取</button>
+        </div>
+        <select class="setting-input" id="model-select" style="margin-top:6px;display:none;">
+          <option value="">（尚未拉取）</option>
+        </select>
       </div>
 
       <div class="setting-item">
@@ -413,7 +442,13 @@ export function renderHome() {
         <span class="metric-label">总时长</span>
         <span class="metric-value amber" id="live-duration">—</span>
       </div>
+      <div class="metric-row">
+        <span class="metric-label">本会话 Token</span>
+        <span class="metric-value cyan" id="live-session-tokens">0</span>
+      </div>
       <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+      <button class="mini-btn" style="margin-top:12px;" onclick="refreshUsage()">查看累计用量</button>
+      <div class="hint" id="usage-info" style="margin-top:8px;">—</div>
     </div>
 
     <div class="sidebar-footer">
@@ -460,6 +495,82 @@ let isStreaming = false;
 let currentController = null;
 let renderTimer = null;
 let newChat = false;
+let sessionTokens = 0;
+
+// ---- Theme ----
+(function initTheme() {
+  var saved = localStorage.getItem('iot-theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+})();
+
+document.getElementById('theme-toggle').addEventListener('click', function() {
+  var cur = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  var next = cur === 'light' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('iot-theme', next);
+  updateThemeButton();
+});
+
+function updateThemeButton() {
+  var light = document.documentElement.getAttribute('data-theme') === 'light';
+  document.getElementById('theme-toggle').textContent = light ? '☾ 黑夜' : '☀ 白天';
+}
+
+// ---- Endpoint (full URL) ----
+function defaultEndpoint() {
+  return location.origin + '/v1/chat/completions';
+}
+function updateEndpointFull() {
+  var v = document.getElementById('endpoint').value.trim() || defaultEndpoint();
+  var full = v.startsWith('http') ? v : location.origin + (v.startsWith('/') ? v : '/' + v);
+  document.getElementById('endpoint-full').textContent = '完整 URL: ' + full;
+}
+document.getElementById('endpoint').value = defaultEndpoint();
+document.getElementById('endpoint').addEventListener('input', updateEndpointFull);
+updateEndpointFull();
+updateThemeButton();
+
+// ---- Fetch model list from /v1/models ----
+async function fetchModels() {
+  var sel = document.getElementById('model-select');
+  try {
+    var res = await fetch('/v1/models');
+    var data = await res.json();
+    var models = (data.data || []).map(function(m) { return m.id; });
+    if (!models.length) throw new Error('模型列表为空');
+    sel.innerHTML = models.map(function(id) {
+      return '<option value="' + id + '">' + id + '</option>';
+    }).join('');
+    sel.style.display = 'block';
+    if (models.indexOf(document.getElementById('model').value) < 0) {
+      document.getElementById('model').value = models[0];
+    }
+    sel.value = document.getElementById('model').value;
+  } catch (e) {
+    alert('拉取模型列表失败: ' + e.message);
+  }
+}
+document.getElementById('model-select').addEventListener('change', function() {
+  if (this.value) document.getElementById('model').value = this.value;
+});
+
+// ---- Cumulative usage from /v1/usage ----
+async function refreshUsage() {
+  var info = document.getElementById('usage-info');
+  var key = document.getElementById('api-key').value.trim();
+  if (!key) { info.textContent = '请先填写 API Key'; return; }
+  info.textContent = '查询中……';
+  try {
+    var res = await fetch('/v1/usage', { headers: { 'Authorization': 'Bearer ' + key } });
+    var data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || ('HTTP ' + res.status));
+    info.textContent = '请求 ' + data.requests + ' 次 · 输入 ' + data.prompt_tokens +
+      ' · 输出 ' + data.completion_tokens + ' · 合计 ' +
+      (data.prompt_tokens + data.completion_tokens) + ' tokens';
+  } catch (e) {
+    info.textContent = '查询失败: ' + e.message;
+  }
+}
 
 msgInput.addEventListener('keydown', function(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -807,6 +918,10 @@ async function sendMessage() {
         if (data === '[DONE]') continue;
         try {
           const json = JSON.parse(data);
+          if (json.usage && json.usage.total_tokens) {
+            sessionTokens += json.usage.total_tokens;
+            document.getElementById('live-session-tokens').textContent = sessionTokens;
+          }
           const choice = json.choices?.[0]?.delta || {};
           const delta = choice.content || '';
           const reasoningDelta = choice.reasoning_content || '';
@@ -914,6 +1029,7 @@ function clearChat() {
   document.getElementById('live-ttft').textContent = '—';
   document.getElementById('live-tokens-out').textContent = '0';
   document.getElementById('live-duration').textContent = '—';
+  document.getElementById('live-session-tokens').textContent = sessionTokens;
   document.getElementById('progress-fill').style.width = '0%';
 }
 

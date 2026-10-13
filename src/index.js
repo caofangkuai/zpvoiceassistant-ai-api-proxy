@@ -3,6 +3,7 @@ import { handleModels } from "./models.js";
 import { decodeCredential, extractApiKey } from "./credential.js";
 import { corsFor } from "./cors.js";
 import { renderHome } from "./ui.js";
+import { getUsage } from "./history.js";
 
 function json(data, status = 200, request = null) {
   const cors = request ? corsFor(request) : { "Access-Control-Allow-Origin": "*" };
@@ -38,6 +39,26 @@ export default {
     // Public model list for OpenAI-compatible clients.
     if (pathname === "/v1/models" && request.method === "GET") {
       return handleModels(env, corsFor(request));
+    }
+
+    // Token usage accounting for the caller's sn (requires the API key).
+    if (pathname === "/v1/usage" && request.method === "GET") {
+      const apiKey = extractApiKey(request);
+      if (!apiKey) {
+        return json(
+          errorBody("Missing API key.", "authentication_error", "invalid_api_key"),
+          401,
+          request
+        );
+      }
+      let cred;
+      try {
+        cred = decodeCredential(apiKey);
+      } catch (e) {
+        return json(errorBody(`Invalid API key: ${e.message}`, "authentication_error", "invalid_api_key"), 401, request);
+      }
+      const usage = await getUsage(env, cred.sn);
+      return json({ object: "usage", sn: cred.sn, ...usage }, 200, request);
     }
 
     if (pathname === "/v1/chat/completions") {

@@ -23,13 +23,19 @@ OpenAI 兼容 API 反向代理，运行在 Cloudflare Workers 上。
 - 首轮注入系统提示词（默认人格 + 中文回复）。
 - 上游错误以 OpenAI 错误格式透传。
 - 已启用 CORS，供浏览器客户端使用（反射 Origin 与请求头）。
+- 内置中文 Web 调试主页（`/`）：secret/sn 生成 API Key、拉取模型列表、白天/黑夜主题
+  切换、完整接口地址显示、聊天调试与实时指标。
+- Token 用量记录：按 `sn` 累计请求数、输入/输出 token（KV，30 天），可用
+  `GET /v1/usage` 查询。
 
 ## 接口
 
 | 方法 | 路径 | 说明 |
 | ---- | ---- | ---- |
+| GET  | `/`、`/ui` | 中文 Web 调试主页（无需鉴权）。 |
 | GET  | `/health` | 健康检查（无需鉴权）。 |
-| GET  | `/v1/models` | 模型列表：`deepseek-v3`、`deepseek-r1`。 |
+| GET  | `/v1/models` | 模型列表：`deepseek-v3`、`deepseek-r1`、`baike`。 |
+| GET  | `/v1/usage` | 查询该 API Key 对应 `sn` 的累计 token 用量（需鉴权）。 |
 | POST | `/v1/chat/completions` | OpenAI 对话补全（支持流式）。 |
 
 ## 鉴权
