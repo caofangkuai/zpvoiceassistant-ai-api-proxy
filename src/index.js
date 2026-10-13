@@ -2,6 +2,7 @@ import { handleChatCompletions } from "./openai.js";
 import { handleModels } from "./models.js";
 import { decodeCredential, extractApiKey } from "./credential.js";
 import { corsFor } from "./cors.js";
+import { renderHome } from "./ui.js";
 
 function json(data, status = 200, request = null) {
   const cors = request ? corsFor(request) : { "Access-Control-Allow-Origin": "*" };
@@ -27,6 +28,11 @@ export default {
     // Health check (no auth) so the worker is easily probeable.
     if (pathname === "/health") {
       return json({ status: "ok", service: "iot-ai-proxy" }, 200, request);
+    }
+
+    // Home page: build an API key and chat for debugging.
+    if ((pathname === "/" || pathname === "/ui") && (request.method === "GET" || request.method === "HEAD")) {
+      return renderHome();
     }
 
     // Public model list for OpenAI-compatible clients.
