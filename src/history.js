@@ -13,9 +13,42 @@
 import { sendChatTurn } from "./upstream.js";
 
 const PREFIX = "hist:";
+const TOKEN_PREFIX = "tok:";
 
 function key(sn, chatId) {
   return `${PREFIX}${sn}:${chatId}`;
+}
+
+// Cache a freshly-logged-in token keyed by sn + secret fingerprint so we don't
+// hit the login endpoint on every request, and so different secrets with the
+// same sn never share a token. Tokens are JWTs with their own expiry; we keep a
+// short TTL.
+export async function getCachedToken(env, sn, secret) {
+  if (!env.HISTORY || !sn) return "";
+  try {
+    return (await env.HISTORY.get(`${TOKEN_PREFIX}${sn}:${secretKey(secret)}`)) || "";
+  } catch {
+    return "";
+  }
+}
+
+export async function setCachedToken(env, sn, secret, token) {
+  if (!env.HISTORY || !sn || !token) return;
+  try {
+    await env.HISTORY.put(`${TOKEN_PREFIX}${sn}:${secretKey(secret)}`, token, {
+      expirationTtl: 60 * 60 * 12,
+    });
+  } catch {
+    // best-effort
+  }
+}
+
+// Short non-cryptographic fingerprint of the secret, for the token cache key.
+function secretKey(secret) {
+  let h = 5381;
+  const s = String(secret || "");
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(16);
 }
 
 // Read the number of already-replayed non-system messages for this conversation.
@@ -68,6 +101,7 @@ export async function backfillHistory(
   chatId,
   messages,
   model,
+  kind,
   firstTurnPrefix = ""
 ) {
   const nonSystem = messages.filter((m) => m && m.role !== "system");
@@ -96,6 +130,7 @@ export async function backfillHistory(
         content,
         model,
         role,
+        kind,
       });
       // Drain the body so the request completes and the upstream records it.
       await res.text();

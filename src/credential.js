@@ -1,25 +1,26 @@
 // API-key credential handling.
 //
-// Rather than hard-coding per-device parameters (token / sn / secret) into
-// wrangler.toml, the client supplies a single base64-encoded API key that decodes
-// to a JSON object holding everything the upstream signature needs. This keeps
-// the worker deployment minimal and lets each caller carry their own device
-// identity.
+// The client supplies a compact API key. Two forms are accepted:
 //
-// The key is a URL-safe base64 encoding (padding optional) of JSON like:
+//   1. "secret;sn"          (preferred, simplest)
+//   2. base64(JSON)         (legacy / advanced, may carry extra overrides)
+//
+// In form 2 the JSON may hold any of:
 //   {
-//     "token":    "<jwt>",
-//     "sn":       "*************",
 //     "secret":   "********************************",
-//     "buildNum": "163", "buildTime": "2512151629",       // optional overrides
+//     "sn":       "*************",
+//     "token":    "<jwt>",                               // optional
+//     "buildNum": "163", "buildTime": "2512151629",      // optional overrides
 //     "versionName": "4.3.14", "versionCode": "4030014",
 //     "appName": "com.zuoyebang.iot.pad.zpvoiceassistant",
 //     "romVersion": "4.3.0", "local": "zh-CN"
 //   }
 //
-// Only `token` and `sn` are required; everything else has an app-level default in
-// upstream.js or may be overridden per request via headers. This is a PUBLIC
-// proxy, so nothing device-specific is read from the worker env.
+// `secret` and `sn` are required. `token` is optional: when absent the proxy
+// obtains one automatically via the device login endpoint (see upstream.login).
+// Everything else has an app-level default in upstream.js or may be overridden
+// per request via headers. This is a PUBLIC proxy, so nothing device-specific is
+// read from the worker env.
 
 function base64ToBytes(b64) {
   const normalized = b64.replace(/-/g, "+").replace(/_/g, "/").replace(/\s+/g, "");
@@ -30,16 +31,49 @@ function base64ToBytes(b64) {
   return bytes;
 }
 
-// Decode a base64 API key into a credential object. Throws on malformed input.
+function validate(obj) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+    throw new Error("api key payload must be a JSON object");
+  }
+  // `secret` is required: it signs both the login and chat requests.
+  if (!obj.secret || typeof obj.secret !== "string") {
+    throw new Error("api key is missing 'secret'");
+  }
+  // `sn` is required by the upstream (it returns error.sn.null without it) and is
+  // also the prefix used to build chatIds.
+  if (!obj.sn || typeof obj.sn !== "string") {
+    throw new Error("api key is missing 'sn'");
+  }
+  if (obj.token !== undefined && typeof obj.token !== "string") {
+    throw new Error("api key 'token' must be a string");
+  }
+  return obj;
+}
+
+// Decode an API key into a credential object. Throws on malformed input.
 export function decodeCredential(apiKey) {
   if (!apiKey || typeof apiKey !== "string") {
     throw new Error("missing api key");
   }
+  const raw = apiKey.trim();
+
+  // Form 1: "secret;sn" (also tolerate "secret;sn;token").
+  if (raw.includes(";") && !raw.includes("{")) {
+    const parts = raw.split(";");
+    const secret = (parts[0] || "").trim();
+    const sn = (parts[1] || "").trim();
+    const token = (parts[2] || "").trim();
+    const obj = { secret, sn };
+    if (token) obj.token = token;
+    return validate(obj);
+  }
+
+  // Form 2: base64(JSON).
   let json;
   try {
-    json = new TextDecoder().decode(base64ToBytes(apiKey));
+    json = new TextDecoder().decode(base64ToBytes(raw));
   } catch {
-    throw new Error("api key is not valid base64");
+    throw new Error("api key is not valid base64 or 'secret;sn'");
   }
   let obj;
   try {
@@ -47,18 +81,7 @@ export function decodeCredential(apiKey) {
   } catch {
     throw new Error("api key payload is not valid JSON");
   }
-  if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
-    throw new Error("api key payload must be a JSON object");
-  }
-  if (!obj.token || typeof obj.token !== "string") {
-    throw new Error("api key payload is missing 'token'");
-  }
-  // `sn` is required by the upstream (it returns error.sn.null without it) and is
-  // also the prefix used to build chatIds.
-  if (!obj.sn || typeof obj.sn !== "string") {
-    throw new Error("api key payload is missing 'sn'");
-  }
-  return obj;
+  return validate(obj);
 }
 
 // Pull the API key from the usual OpenAI / generic header locations.

@@ -148,6 +148,71 @@ export function resolveSecret(cred) {
   return cred && cred.secret ? String(cred.secret) : "";
 }
 
+// Device login endpoint. Reverse-engineered from
+// com.zuoyebang.iot.zptcpservice.login.HttpLogin: POSTs a SendLoginMessage to
+// "<pad server>/iot-device/device/login". The body carries its own `sig`
+// (same MD5 scheme as chat) over {sn, wifi_mac, bt_mac, stamp, init, version};
+// no query signature is used. Only `sn` + `secret` are truly required — the
+// other fields may be empty/default. On success the response is
+// {"data": {"token": "<jwt>", ...}}.
+const LOGIN_PATH = "iot-device/device/login";
+
+function loginBase(env) {
+  // Derive the origin from UPSTREAM_BASE (which points at the /iot-study path).
+  const base = env.UPSTREAM_BASE || "https://iot-admin.zuoyebang.com/iot-study/assistant";
+  try {
+    return new URL(base).origin + "/";
+  } catch {
+    return "https://iot-admin.zuoyebang.com/";
+  }
+}
+
+// Obtain a fresh auth token using only the client's sn + secret. Returns the
+// token string, or throws on failure.
+export async function login(env, cred) {
+  const secret = resolveSecret(cred);
+  const sn = cred && cred.sn ? String(cred.sn) : "";
+  if (!sn) throw new Error("login requires 'sn'");
+
+  const stamp = Date.now();
+  const signed = {
+    sn,
+    wifi_mac: "",
+    bt_mac: "",
+    stamp: String(stamp),
+    init: "0",
+    version: "",
+  };
+  const sig = computeSig(signed, secret);
+  const body = {
+    sn,
+    wifi_mac: "",
+    bt_mac: "",
+    stamp,
+    init: 0,
+    sig,
+    version: "",
+    osInfo: { buildType: "", fingerPrint: "", host: "", adbEnable: false },
+    appInfo: { versionCode: 0, versionName: "" },
+  };
+
+  const res = await fetch(loginBase(env) + LOGIN_PATH, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`login HTTP ${res.status}`);
+  }
+  const json = await res.json().catch(() => null);
+  const token = json && json.data && json.data.token;
+  if (!token || typeof token !== "string") {
+    const msg = (json && (json.errMsg || json.message)) || "no token in login response";
+    throw new Error(`login failed: ${msg}`);
+  }
+  return token;
+}
+
 // Build the signed query string for a request. `commonParams` is the output of
 // resolveCommonParams. `bodyStr` is the exact JSON body that will be sent (its
 // top-level keys participate in the signature).
@@ -227,27 +292,44 @@ export function deriveChatId(sn, seed) {
   return `${tail}-${hyphens}`;
 }
 
-// Map an OpenAI-facing model name to the upstream model + reasoning flag.
-// Upstream uses ChatKind "8" (DEEPSEEK). Reasoning ("deep search") is expressed
-// purely via the model field: deepseek-r1 enables it, deepseek-v3 does not.
-// See GetChatModelUseCase in the APK.
+// The upstream-facing model identifiers this proxy exposes.
+export const SUPPORTED_MODELS = ["deepseek-v3", "deepseek-r1", "baike"];
+
+// Map an OpenAI-facing model name to the upstream model + reasoning flag + chat
+// kind. Upstream uses ChatKind "8" (DEEPSEEK) for the LLM assistant and "30"
+// (ENCYCLOPEDIA) for the "百科" knowledge-Q&A skill, which is server-driven and
+// carries no model field. Reasoning ("deep search") is expressed purely via the
+// model field: deepseek-r1 enables it, deepseek-v3 does not.
+// See GetChatModelUseCase / ChatKind in the APK.
+//
+// Only the exact model IDs in SUPPORTED_MODELS are accepted; unknown names
+// return null so the caller can reject them instead of silently falling back.
 export function resolveUpstreamModel(model) {
   const m = (model || "").toLowerCase();
-  if (m.includes("r1") || m.includes("reason") || m.includes("think") || m.includes("search")) {
-    return { model: "deepseek-r1", reasoning: true };
+  if (m === "baike") {
+    return { model: null, reasoning: false, kind: "30" };
   }
-  return { model: "deepseek-v3", reasoning: false };
+  if (m === "deepseek-r1") {
+    return { model: "deepseek-r1", reasoning: true, kind: "8" };
+  }
+  if (m === "deepseek-v3") {
+    return { model: "deepseek-v3", reasoning: false, kind: "8" };
+  }
+  return null;
 }
 
 // Build the upstream /chat request body from the last user message and an
 // optional existing chatId. `childId` is not required by upstream (0 works).
-// `role` may be "user" or "assistant" (used when replaying history).
-export function buildChatBody({ chatId, content, model, role = "user" }) {
+// `role` may be "user" or "assistant" (used when replaying history). `kind`
+// selects the upstream skill (default "8" = DeepSeek). The `model` field is only
+// included for the DeepSeek kind; other skills are server-driven and carry no
+// model (the app sends a null model which Gson omits).
+export function buildChatBody({ chatId, content, model, role = "user", kind = "8" }) {
   const now = Date.now();
-  return {
+  const body = {
     chatId: chatId || "",
     from: 0,
-    kind: "8",
+    kind,
     message: [
       {
         chatId: chatId || "",
@@ -255,22 +337,25 @@ export function buildChatBody({ chatId, content, model, role = "user" }) {
         content,
         createTime: now,
         reqId: crypto.randomUUID(),
-        kind: "8",
+        kind,
         msgId: 0,
         reasonContent: "",
         role,
         status: role === "assistant" ? 2 : 0,
       },
     ],
-    model: model || "deepseek-v3",
   };
+  if (kind === "8") {
+    body.model = model || "deepseek-v3";
+  }
+  return body;
 }
 
 // Send a single turn (user or assistant) to the upstream /chat endpoint and
 // return the fetch Response. Used both for the live request and for replaying
 // prior history into a thread (backfill).
-export async function sendChatTurn(env, commonParams, secret, { chatId, content, model, role }) {
-  const bodyStr = JSON.stringify(buildChatBody({ chatId, content, model, role }));
+export async function sendChatTurn(env, commonParams, secret, { chatId, content, model, role, kind }) {
+  const bodyStr = JSON.stringify(buildChatBody({ chatId, content, model, role, kind }));
   const url = `${env.UPSTREAM_BASE}/chat?${buildSignedQuery(commonParams, secret, bodyStr)}`;
   return fetch(url, {
     method: "POST",

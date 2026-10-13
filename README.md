@@ -13,8 +13,8 @@ OpenAI 兼容 API 反向代理，运行在 Cloudflare Workers 上。
 - 流式（SSE）与非流式响应。
 - 推理模型：`deepseek-r1` 会把上游 `reasonContent` 映射为 OpenAI 的
   `reasoning_content`（流式 delta + 非流式 message 字段）。
-- 公开凭证模式：每个调用方通过 base64 API key 自带设备凭证，worker 中不存放任何
-  设备相关参数。
+- 公开凭证模式：每个调用方通过 API key 自带设备凭证（`secret;sn`），worker 中不存
+  放任何设备相关参数；token 由代理自动登录获取并缓存。
 - 以 `chatId` 为键的会话连续性；多轮对话使用确定性 chatId，新会话使用全新
   chatId。
 - 历史回填：当客户端在单次请求中携带完整消息历史时，代理会把更早的轮次逐条回放
@@ -34,25 +34,36 @@ OpenAI 兼容 API 反向代理，运行在 Cloudflare Workers 上。
 
 ## 鉴权
 
-API key **就是**凭证。把 base64 编码后的 JSON 对象作为 Bearer token 传入：
+API key 支持两种形式：
+
+### 1. `secret;sn`（推荐，最简单）
+
+```
+********************************;*************
+```
+
+代理会用 `sn` + `secret` 自动调用设备登录接口
+（`iot-device/device/login`）获取 token，并缓存（按 `sn` + secret 指纹，TTL 12 小时）。
+
+### 2. base64(JSON)（兼容/高级，可带额外覆盖项）
 
 ```json
 {
-  "token": "<jwt>",
+  "secret": "********************************",
   "sn": "*************",
-  "secret": "********************************"
+  "token": "<jwt>"
 }
 ```
 
-只有 `token` 与 `sn` 是必填项。可选覆盖字段（详见 `src/credential.js`）：
-`buildNum`、`buildTime`、`versionName`、`versionCode`、`appName`、`romVersion`、
-`local`。
+只有 `secret` 与 `sn` 必填；`token` 可选，省略时自动登录获取。可选覆盖字段（详见
+`src/credential.js`）：`buildNum`、`buildTime`、`versionName`、`versionCode`、
+`appName`、`romVersion`、`local`。
 
-把 JSON 编码为 base64 API key：
+生成 base64 key：
 
 ```bash
-node -e 'console.log(Buffer.from(JSON.stringify({token:process.argv[1],sn:process.argv[2],secret:process.argv[3]})).toString("base64"))' \
-  "<jwt>" "*************" "********************************"
+node -e 'console.log(Buffer.from(JSON.stringify({secret:process.argv[1],sn:process.argv[2]})).toString("base64"))' \
+  "********************************" "*************"
 ```
 
 以 `Authorization: Bearer <key>` 发送（也支持 `x-api-key` / `api-key`）。

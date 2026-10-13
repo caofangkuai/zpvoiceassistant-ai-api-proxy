@@ -1,12 +1,12 @@
 import { CORS_HEADERS } from "./cors.js";
+import { SUPPORTED_MODELS } from "./upstream.js";
 
 export function handleModels(env, cors = CORS_HEADERS) {
   const created = Math.floor(Date.now() / 1000);
-  const ids = ["deepseek-v3", "deepseek-r1"];
   return new Response(
     JSON.stringify({
       object: "list",
-      data: ids.map((id) => ({
+      data: SUPPORTED_MODELS.map((id) => ({
         id,
         object: "model",
         created,

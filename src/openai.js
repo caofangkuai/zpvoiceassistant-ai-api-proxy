@@ -1,13 +1,14 @@
 import {
   deriveChatId,
   generateChatId,
+  login,
   parseUpstreamSSE,
   resolveCommonParams,
   resolveSecret,
   resolveUpstreamModel,
   sendChatTurn,
 } from "./upstream.js";
-import { backfillHistory } from "./history.js";
+import { backfillHistory, getCachedToken, setCachedToken } from "./history.js";
 import { CORS_HEADERS, corsFor } from "./cors.js";
 
 // Injected as a prefix on the first turn of a brand-new conversation. Sets a
@@ -65,8 +66,40 @@ export async function handleChatCompletions(request, env, cred) {
   }
 
   const requestedModel = body.model || env.DEFAULT_MODEL || "deepseek-v3";
-  const { model, reasoning } = resolveUpstreamModel(requestedModel);
+  const resolvedModel = resolveUpstreamModel(requestedModel);
+  if (!resolvedModel) {
+    return err(
+      `The model '${requestedModel}' does not exist or is not supported. Supported models: deepseek-v3, deepseek-r1, baike.`,
+      "invalid_request_error",
+      "model_not_found",
+      404,
+      cors
+    );
+  }
+  const { model, reasoning, kind } = resolvedModel;
   const stream = body.stream !== false; // default to streaming
+
+  // Resolve the auth token. The API key may carry one directly; otherwise we log
+  // in with the client's sn + secret (cached per sn in KV) to obtain one.
+  if (!request.headers.get("x-iot-token") && (!cred.token || typeof cred.token !== "string")) {
+    const cached = await getCachedToken(env, cred.sn, cred.secret);
+    if (cached) {
+      cred.token = cached;
+    } else {
+      try {
+        cred.token = await login(env, cred);
+        await setCachedToken(env, cred.sn, cred.secret, cred.token);
+      } catch (e) {
+        return err(
+          `Login failed: ${e.message}. Provide a valid 'secret;sn' or include a token.`,
+          "authentication_error",
+          "login_failed",
+          401,
+          cors
+        );
+      }
+    }
+  }
 
   // All device-specific params come from the client credential (public proxy).
   const commonParams = resolveCommonParams(cred, request);
@@ -130,6 +163,7 @@ export async function handleChatCompletions(request, env, cred) {
       chatId,
       messages,
       model,
+      kind,
       FIRST_TURN_SYSTEM_PROMPT
     );
     if (final && final.role === "user") {
@@ -150,6 +184,7 @@ export async function handleChatCompletions(request, env, cred) {
     content: liveContent,
     model,
     role: "user",
+    kind,
   });
 
   if (!upstream.ok) {
