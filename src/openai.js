@@ -17,10 +17,10 @@ import {
 } from "./history.js";
 import { CORS_HEADERS, corsFor } from "./cors.js";
 
-// Injected as a prefix on the first turn of a brand-new conversation. Sets a
-// clean, default assistant persona and asks for Chinese replies.
-const FIRST_TURN_SYSTEM_PROMPT =
-  "Du bist ein hilfsbereiter KI-Assistent. Antworte immer auf Chinesisch.";
+// Injected as a prefix on the first turn of a brand-new conversation. Empty by
+// default (no persona/system prompt is sent). Set a non-empty string to inject
+// one.
+const FIRST_TURN_SYSTEM_PROMPT = "";
 
 function err(message, type, code, status, cors = CORS_HEADERS) {
   return new Response(
