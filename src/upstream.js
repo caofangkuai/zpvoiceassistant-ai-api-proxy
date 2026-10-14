@@ -351,15 +351,35 @@ export function buildChatBody({ chatId, content, model, role = "user", kind = "8
   return body;
 }
 
-// The upstream API requires all chat text to be sent as Unicode escapes: every
-// non-ASCII character must be serialized as a \uXXXX escape so the request body
-// is pure ASCII. JSON.stringify leaves non-ASCII characters verbatim, so we
-// post-process the serialized body. Because the signature is computed over the
-// serialized body, escaping must happen before signing and sending.
-export function stringifyUnicode(value) {
-  return JSON.stringify(value).replace(
-    /[\u0080-\uffff]/g,
-    (ch) => "\\u" + ch.charCodeAt(0).toString(16).padStart(4, "0")
+// The upstream API requires the chat message text to be sent as Unicode: every
+// character of `content` (ASCII included) is serialized as a \uXXXX escape, so
+// the request body's content value is pure ASCII escapes. JSON.stringify does
+// not do this (it leaves ASCII and non-ASCII verbatim), so we serialize the body
+// with the content replaced by its fully escaped form. Because the signature is
+// computed over the serialized body, escaping happens before signing/sending.
+//
+// Example: content "你好a" -> "content":"\u4f60\u597d\u0061"
+export function escapeAllToUnicode(str) {
+  const s = String(str ?? "");
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    out += "\\u" + s.charCodeAt(i).toString(16).padStart(4, "0");
+  }
+  return out;
+}
+
+// Serialize a chat body so that each message's `content` is fully escaped as
+// \uXXXX (every character, ASCII included). Other fields keep normal JSON.
+export function serializeChatBody(body) {
+  const messages = Array.isArray(body.message) ? body.message : [];
+  const contents = messages.map((m) => (m && m.content != null ? String(m.content) : ""));
+  const marker = "\u0000__CFK_CONTENT__\u0000";
+  const marked = messages.map((m) => (m && m.content != null ? { ...m, content: marker } : m));
+  const json = JSON.stringify({ ...body, message: marked });
+  const token = JSON.stringify(marker);
+  let i = 0;
+  return json.replace(new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), () =>
+    `"${escapeAllToUnicode(contents[i++])}"`
   );
 }
 
@@ -367,7 +387,7 @@ export function stringifyUnicode(value) {
 // return the fetch Response. Used both for the live request and for replaying
 // prior history into a thread (backfill).
 export async function sendChatTurn(env, commonParams, secret, { chatId, content, model, role, kind }) {
-  const bodyStr = stringifyUnicode(buildChatBody({ chatId, content, model, role, kind }));
+  const bodyStr = serializeChatBody(buildChatBody({ chatId, content, model, role, kind }));
   const url = `${env.UPSTREAM_BASE}/chat?${buildSignedQuery(commonParams, secret, bodyStr)}`;
   return fetch(url, {
     method: "POST",
