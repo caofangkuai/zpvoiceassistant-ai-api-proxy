@@ -21,6 +21,8 @@ OpenAI 兼容 API 反向代理，运行在 Cloudflare Workers 上。
   到上游线程（基于 KV，可选）。
 - 清空上下文：通过 `x-iot-new-chat: true` 或包含 `[new_chat]` 的 system 消息。
 - 首轮注入系统提示词（默认人格 + 中文回复）。
+- 上游强制要求：发送给 AI 的聊天文本自动全部转为 Unicode 转义（`\uXXXX`），
+  请求体为纯 ASCII；转义在签名之前完成，保证签名与请求体一致。
 - 上游错误以 OpenAI 错误格式透传。
 - 已启用 CORS，供浏览器客户端使用（反射 Origin 与请求头）。
 - 内置中文 Web 调试主页（`/`）：secret/sn 生成 API Key、拉取模型列表、白天/黑夜主题

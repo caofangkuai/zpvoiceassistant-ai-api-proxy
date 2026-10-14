@@ -351,11 +351,23 @@ export function buildChatBody({ chatId, content, model, role = "user", kind = "8
   return body;
 }
 
+// The upstream API requires all chat text to be sent as Unicode escapes: every
+// non-ASCII character must be serialized as a \uXXXX escape so the request body
+// is pure ASCII. JSON.stringify leaves non-ASCII characters verbatim, so we
+// post-process the serialized body. Because the signature is computed over the
+// serialized body, escaping must happen before signing and sending.
+export function stringifyUnicode(value) {
+  return JSON.stringify(value).replace(
+    /[\u0080-\uffff]/g,
+    (ch) => "\\u" + ch.charCodeAt(0).toString(16).padStart(4, "0")
+  );
+}
+
 // Send a single turn (user or assistant) to the upstream /chat endpoint and
 // return the fetch Response. Used both for the live request and for replaying
 // prior history into a thread (backfill).
 export async function sendChatTurn(env, commonParams, secret, { chatId, content, model, role, kind }) {
-  const bodyStr = JSON.stringify(buildChatBody({ chatId, content, model, role, kind }));
+  const bodyStr = stringifyUnicode(buildChatBody({ chatId, content, model, role, kind }));
   const url = `${env.UPSTREAM_BASE}/chat?${buildSignedQuery(commonParams, secret, bodyStr)}`;
   return fetch(url, {
     method: "POST",
