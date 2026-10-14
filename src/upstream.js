@@ -351,15 +351,15 @@ export function buildChatBody({ chatId, content, model, role = "user", kind = "8
   return body;
 }
 
-// The upstream API requires the chat message text to be sent as Unicode: every
-// character of `content` (ASCII included) is serialized as a \uXXXX escape, so
-// the request body's content value is pure ASCII escapes. JSON.stringify does
-// not do this (it leaves ASCII and non-ASCII verbatim), so we serialize the body
-// ourselves, emitting the `content` string as its fully escaped form. Because the
-// signature is computed over the serialized body, escaping happens before
-// signing/sending.
+// The upstream API requires the chat message text to be sent as literal Unicode
+// escape text: the model must receive the characters `\u4f60\u597d` themselves
+// (not the decoded glyphs). To make JSON parsing yield the literal escape text,
+// the backslashes must survive transport, so the escaped text is JSON-encoded a
+// second time (each `\` becomes `\\`). Because the signature is computed over the
+// serialized body, escaping happens before signing/sending.
 //
-// Example: content "你好a" -> "content":"\u4f60\u597d\u0061"
+// Example: content "你好a" -> "content":"\\u4f60\\u597d\\u0061"
+// The upstream JSON-decodes that to the literal text: \u4f60\u597d\u0061
 export function escapeAllToUnicode(str) {
   const s = String(str ?? "");
   let out = "";
@@ -369,20 +369,21 @@ export function escapeAllToUnicode(str) {
   return out;
 }
 
-// Serialize one message object. Its `content` is emitted as an all-\uXXXX
-// escaped JSON string; every other field uses ordinary JSON.
+// Serialize one message object. Its `content` becomes a JSON string whose value
+// is the literal all-\uXXXX escape text (backslashes JSON-escaped); every other
+// field uses ordinary JSON.
 function serializeMessage(m) {
   const parts = Object.entries(m).map(([k, v]) => {
     if (k === "content" && v != null) {
-      return `${JSON.stringify(k)}:"${escapeAllToUnicode(String(v))}"`;
+      return `${JSON.stringify(k)}:${JSON.stringify(escapeAllToUnicode(String(v)))}`;
     }
     return `${JSON.stringify(k)}:${JSON.stringify(v)}`;
   });
   return `{${parts.join(",")}}`;
 }
 
-// Serialize a chat body so that each message's `content` is fully escaped as
-// \uXXXX (every character, ASCII included). Other fields keep normal JSON.
+// Serialize a chat body so that each message's `content` is the literal Unicode
+// escape text (every character, ASCII included). Other fields keep normal JSON.
 export function serializeChatBody(body) {
   const parts = Object.entries(body).map(([k, v]) => {
     if (k === "message" && Array.isArray(v)) {
