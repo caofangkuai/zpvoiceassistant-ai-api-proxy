@@ -83,7 +83,7 @@ export async function handleChatCompletions(request, env, cred) {
     );
   }
   const { model, reasoning, kind } = resolvedModel;
-  const stream = body.stream !== false; // default to streaming
+  const stream = body.stream === true; // OpenAI default: non-streaming unless explicitly requested
 
   // Resolve the auth token. The API key may carry one directly; otherwise we log
   // in with the client's sn + secret (cached per sn in KV) to obtain one.
