@@ -355,8 +355,9 @@ export function buildChatBody({ chatId, content, model, role = "user", kind = "8
 // character of `content` (ASCII included) is serialized as a \uXXXX escape, so
 // the request body's content value is pure ASCII escapes. JSON.stringify does
 // not do this (it leaves ASCII and non-ASCII verbatim), so we serialize the body
-// with the content replaced by its fully escaped form. Because the signature is
-// computed over the serialized body, escaping happens before signing/sending.
+// ourselves, emitting the `content` string as its fully escaped form. Because the
+// signature is computed over the serialized body, escaping happens before
+// signing/sending.
 //
 // Example: content "你好a" -> "content":"\u4f60\u597d\u0061"
 export function escapeAllToUnicode(str) {
@@ -368,19 +369,28 @@ export function escapeAllToUnicode(str) {
   return out;
 }
 
+// Serialize one message object. Its `content` is emitted as an all-\uXXXX
+// escaped JSON string; every other field uses ordinary JSON.
+function serializeMessage(m) {
+  const parts = Object.entries(m).map(([k, v]) => {
+    if (k === "content" && v != null) {
+      return `${JSON.stringify(k)}:"${escapeAllToUnicode(String(v))}"`;
+    }
+    return `${JSON.stringify(k)}:${JSON.stringify(v)}`;
+  });
+  return `{${parts.join(",")}}`;
+}
+
 // Serialize a chat body so that each message's `content` is fully escaped as
 // \uXXXX (every character, ASCII included). Other fields keep normal JSON.
 export function serializeChatBody(body) {
-  const messages = Array.isArray(body.message) ? body.message : [];
-  const contents = messages.map((m) => (m && m.content != null ? String(m.content) : ""));
-  const marker = "\u0000__CFK_CONTENT__\u0000";
-  const marked = messages.map((m) => (m && m.content != null ? { ...m, content: marker } : m));
-  const json = JSON.stringify({ ...body, message: marked });
-  const token = JSON.stringify(marker);
-  let i = 0;
-  return json.replace(new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), () =>
-    `"${escapeAllToUnicode(contents[i++])}"`
-  );
+  const parts = Object.entries(body).map(([k, v]) => {
+    if (k === "message" && Array.isArray(v)) {
+      return `${JSON.stringify(k)}:[${v.map(serializeMessage).join(",")}]`;
+    }
+    return `${JSON.stringify(k)}:${JSON.stringify(v)}`;
+  });
+  return `{${parts.join(",")}}`;
 }
 
 // Send a single turn (user or assistant) to the upstream /chat endpoint and
