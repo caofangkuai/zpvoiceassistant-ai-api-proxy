@@ -1,5 +1,5 @@
 // Home page UI, adapted from turingevo/tiny-webui (MIT), localized to Chinese.
-// Adds a secret/sn -> API key generator on top of the streaming chat client.
+// Adds a secret-sn -> API key generator on top of the streaming chat client.
 
 export function renderHome(basePath = "") {
   const base = basePath.replace(/\/$/, ""); // e.g. "" or "/zpvoiceassistant-ai-api-proxy"
@@ -376,7 +376,7 @@ export function renderHome(basePath = "") {
 
       <div class="hint">
         设备上执行以下命令可直接得到两个值：<br>
-        <code>echo "API Key为: $(getprop ro.boot.secretkey);$(getprop persist.sys.serialno)"</code>
+        <code>echo "API Key为: $(getprop ro.boot.secretkey)-$(getprop persist.sys.serialno)"</code>
       </div>
     </div>
 
@@ -391,7 +391,7 @@ export function renderHome(basePath = "") {
 
       <div class="setting-item">
         <label class="setting-label">API Key</label>
-        <input type="password" class="setting-input" id="api-key" placeholder="secret;sn 或 base64 JSON" />
+        <input type="password" class="setting-input" id="api-key" placeholder="secret-sn 或 base64 JSON" />
       </div>
 
       <div class="setting-item">
@@ -603,7 +603,7 @@ function generateApiKey() {
   const secret = document.getElementById('gen-secret').value.trim();
   const sn = document.getElementById('gen-sn').value.trim();
   if (!secret || !sn) { alert('请填写 secret 和 sn'); return; }
-  document.getElementById('api-key').value = secret + ';' + sn;
+  document.getElementById('api-key').value = secret + '-' + sn;
   alert('API Key 已生成并填入左侧「API Key」输入框');
 }
 

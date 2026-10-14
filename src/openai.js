@@ -97,7 +97,7 @@ export async function handleChatCompletions(request, env, cred) {
         await setCachedToken(env, cred.sn, cred.secret, cred.token);
       } catch (e) {
         return err(
-          `Login failed: ${e.message}. Provide a valid 'secret;sn' or include a token.`,
+          `Login failed: ${e.message}. Provide a valid 'secret-sn' or include a token.`,
           "authentication_error",
           "login_failed",
           401,

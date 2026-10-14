@@ -13,7 +13,7 @@ OpenAI 兼容 API 反向代理，运行在 Cloudflare Workers 上。
 - 流式（SSE）与非流式响应。
 - 推理模型：`deepseek-r1` 会把上游 `reasonContent` 映射为 OpenAI 的
   `reasoning_content`（流式 delta + 非流式 message 字段）。
-- 公开凭证模式：每个调用方通过 API key 自带设备凭证（`secret;sn`），worker 中不存
+- 公开凭证模式：每个调用方通过 API key 自带设备凭证（`secret-sn`），worker 中不存
   放任何设备相关参数；token 由代理自动登录获取并缓存。
 - 以 `chatId` 为键的会话连续性；多轮对话使用确定性 chatId，新会话使用全新
   chatId。
@@ -42,10 +42,10 @@ OpenAI 兼容 API 反向代理，运行在 Cloudflare Workers 上。
 
 API key 支持两种形式：
 
-### 1. `secret;sn`（推荐，最简单）
+### 1. `secret-sn`（推荐，最简单）
 
 ```
-********************************;*************
+********************************-*************
 ```
 
 代理会用 `sn` + `secret` 自动调用设备登录接口

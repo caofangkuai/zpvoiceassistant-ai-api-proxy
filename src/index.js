@@ -67,11 +67,12 @@ export default {
       }
 
       // This is a public proxy: the API key IS the credential. It must be a
-      // base64-encoded JSON blob carrying the caller's device params.
+      // "secret-sn" string (or base64-encoded JSON) carrying the caller's
+      // device params.
       const apiKey = extractApiKey(request);
       if (!apiKey) {
         return json(
-          errorBody("Missing API key. Provide a base64-encoded credential as the Bearer token.", "authentication_error", "invalid_api_key"),
+          errorBody("Missing API key. Provide a 'secret-sn' credential as the Bearer token.", "authentication_error", "invalid_api_key"),
           401,
           request
         );

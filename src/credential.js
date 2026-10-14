@@ -2,7 +2,7 @@
 //
 // The client supplies a compact API key. Two forms are accepted:
 //
-//   1. "secret;sn"          (preferred, simplest)
+//   1. "secret-sn"          (preferred, simplest)
 //   2. base64(JSON)         (legacy / advanced, may carry extra overrides)
 //
 // In form 2 the JSON may hold any of:
@@ -57,9 +57,9 @@ export function decodeCredential(apiKey) {
   }
   const raw = apiKey.trim();
 
-  // Form 1: "secret;sn" (also tolerate "secret;sn;token").
-  if (raw.includes(";") && !raw.includes("{")) {
-    const parts = raw.split(";");
+  // Form 1: "secret-sn" (also tolerate "secret-sn-token").
+  if (raw.includes("-") && !raw.includes("{")) {
+    const parts = raw.split("-");
     const secret = (parts[0] || "").trim();
     const sn = (parts[1] || "").trim();
     const token = (parts[2] || "").trim();
@@ -73,7 +73,7 @@ export function decodeCredential(apiKey) {
   try {
     json = new TextDecoder().decode(base64ToBytes(raw));
   } catch {
-    throw new Error("api key is not valid base64 or 'secret;sn'");
+    throw new Error("api key is not valid base64 or 'secret-sn'");
   }
   let obj;
   try {
